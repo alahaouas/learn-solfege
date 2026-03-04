@@ -1,208 +1,300 @@
-# SolfApp — Claude Code Instructions
+# SolfApp — Contexte projet pour Claude Code
 
-## Project Overview
+## Ce qu'est ce projet
 
-**SolfApp** is a French-language web application for learning music theory (solfège). It targets absolute beginners first and progressively unlocks advanced features as users progress. The UI is entirely in French.
+Application web d'apprentissage du solfège à la française, orientée débutants. Principe fondamental : **Progressive Disclosure** — ne montrer que ce dont l'utilisateur a besoin maintenant. L'architecture complète est dans `docs/PRD_Architecture.md` (référence principale).
 
-PRD & Architecture: `SolfApp_PRD_Architecture.docx`
+## Stack technique
 
-## Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| Framework | React | 18.x |
-| Language | TypeScript | 5.x |
-| Build | Vite | 5.x |
-| Styles | Tailwind CSS | 3.x |
-| UI components | shadcn/ui | latest |
-| Routing | React Router | v6 |
-| State | Zustand | 4.x |
-| Animations | Framer Motion | 11.x |
-| Score rendering | VexFlow | 4.x |
-| MusicXML import | OpenSheetMusicDisplay (OSMD) | 1.x |
-| Audio | Tone.js | 15.x |
-| MIDI | @tonejs/midi | 2.x |
-| Soundfonts | soundfont-player | 0.x |
-| Pitch detection | Pitchy | 4.x |
-| ABC notation | abcjs | 6.x |
-| MXL decompression | JSZip | 3.x |
-| Backend/Auth/DB | Supabase (PostgreSQL) | latest |
-| Tests | Vitest | 1.x |
-
-## Commands
-
-```bash
-npm install          # Install dependencies
-npm run dev          # Start dev server (Vite HMR)
-npm run build        # Production build
-npm run preview      # Preview production build
-npm run test         # Run Vitest unit tests
-npm run lint         # ESLint
-npm run typecheck    # TypeScript type check
+```
+Frontend  : React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui
+State     : Zustand
+Routing   : React Router v6
+Animation : Framer Motion
+Partition : VexFlow (rendu SVG) + OSMD (import MusicXML)
+Audio     : Tone.js + soundfont-player
+Détection : Pitchy (hauteur micro)
+Parsers   : abcjs + @tonejs/midi + JSZip
+Backend   : Supabase (auth + PostgreSQL + Storage)
+Tests     : Vitest + React Testing Library + Playwright
 ```
 
-## Project Structure
+## Commandes essentielles
+
+```bash
+npm run dev          # Serveur dev → http://localhost:5173
+npm run test         # Vitest (unitaires + intégration)
+npm run test:watch   # Vitest mode watch
+npm run test:coverage
+npm run build        # Build prod TypeScript strict
+npm run test:e2e     # Playwright
+npx tsc --noEmit     # Vérification types seule
+```
+
+## Règles architecturales — NE JAMAIS déroger
+
+1. **Le store Zustand est la seule source de vérité.** VexFlow et Tone.js ne communiquent jamais directement. Toute modification passe par une action du store.
+
+2. **`insertNote` — pas `addNote`.** L'action s'appelle `insertNote(measureId, beat, note)`. Elle gère le beat, supprime le silence, joue le son.
+
+3. **Clé de Sol = défaut absolu.** `DEFAULT_CLEF = 'treble'` partout, dans tous les modes. Ne jamais créer une partition sans clé explicite `treble`.
+
+4. **Feature flags par niveau.** Chaque composant filtre ses options via `FEATURES[level]` avant le rendu. Ne jamais afficher une fonction verrouillée.
+
+5. **Timing audio via `Tone.Transport`.** Jamais `setTimeout`. Planifier avec `scheduleRepeat` ou `scheduleOnce`.
+
+6. **VexFlow = rendu seul.** Superposer des zones SVG transparentes pour les clics. Ne pas modifier le SVG VexFlow directement.
+
+## Modèle de données central (source de vérité)
+
+```typescript
+type InstrumentType = 'melodic' | 'keyboard';
+type AppLevel = 'decouverte' | 'apprentissage' | 'pratique' | 'avance';
+type Duration = 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th';
+type Clef = 'treble' | 'bass' | 'alto' | 'tenor' | 'soprano' | 'mezzosoprano' | 'bass3' | 'frenchViolin';
+const DEFAULT_CLEF: Clef = 'treble';
+
+interface Note {
+  id: string;
+  name: NoteName;           // C, D, E, F, G, A, B
+  solfege: string;          // Do, Ré, Mi, Fa, Sol, La, Si (DO FIXE — jamais movable-do)
+  solfegeLabel: string;     // "Ré dièse", "Mi bémol"
+  octave: number;           // 4 = do central (MIDI 60 = Do4 = 261.63 Hz)
+  duration: Duration;
+  accidental: '#' | 'b' | 'n' | null;
+  dots: number;             // 0, 1 (pointée), 2 (double pointée)
+  midiPitch: number;        // 0-127
+  frequency: number;        // Hz
+  startBeat: number;        // Position dans la mesure
+  tie: 'start' | 'stop' | 'continue' | null;  // JAMAIS ties: boolean
+  tiedToId?: string;        // ID de la note liée (pour VexFlow Tie)
+  chord: boolean;           // true = accord (même startBeat)
+  tuplet?: { id: string; type: number; numNotes: number; baseDuration: Duration };
+  ornament?: Ornament;
+  articulation?: Articulation[];
+  restName?: string;        // 'Pause' | 'Demi-pause' | 'Soupir' | 'Demi-soupir'…
+}
+
+interface Measure {
+  id: string;
+  index: number;
+  notes: Note[];            // Phase 1 — monophonie
+  rests: Rest[];
+  voices?: Note[][];        // Phase 2+ — polyphonie
+  timeSignature: TimeSignature;
+  keySignature: KeySignature;
+}
+
+interface Part {            // Phase 2+ — portée d'instrument
+  id: string;
+  instrument: string;
+  clef: Clef;
+  measures: Measure[];
+}
+
+interface Score {
+  id: string;
+  title: string;
+  composer?: string;
+  clef: Clef;               // Défaut : 'treble' — toujours
+  tempo: number;
+  measures: Measure[];
+  parts?: Part[];           // Phase 2+ : piano = 2 parts
+  metadata: ScoreMetadata;
+}
+```
+
+## Store Zustand — actions disponibles
+
+```typescript
+interface AppStore {
+  instrument: InstrumentType;
+  showGrandStaff: boolean;
+  currentScore: Score | null;
+  selectedNoteId: string | null;
+  playbackPosition: number;
+  isPlaying: boolean;
+  mode: 'read' | 'write' | 'exercise';
+  level: AppLevel;
+  selectedDuration: Duration;
+  selectedAccidental: Accidental;
+  history: Score[];
+  historyIndex: number;
+
+  // Actions partition
+  loadScore: (score: Score) => void;
+  insertNote: (measureId: string, beat: number, note: Partial<Note>) => void;
+  deleteNote: (noteId: string) => void;
+  moveNote: (noteId: string, newBeat: number) => void;
+  splitMeasure: (measureId: string) => void;  // débordement rythmique → tie auto
+  setSelectedNote: (noteId: string | null) => void;
+  setMode: (mode: 'read' | 'write' | 'exercise') => void;
+
+  // Audio
+  playScore: () => void;
+  stopPlayback: () => void;
+  setTempo: (bpm: number) => void;
+
+  // Historique
+  undo: () => void;
+  redo: () => void;
+
+  // Niveau
+  setLevel: (level: AppLevel) => void;
+  unlockFeature: (feature: keyof FeatureFlags) => void;
+  setInstrument: (instrument: InstrumentType) => void;
+}
+```
+
+## Feature flags par niveau
+
+```typescript
+const FEATURES: Record<AppLevel, FeatureFlags> = {
+  decouverte: {
+    notes: ['C','D','E','F','G','A','B'],
+    accidentals: [],
+    durations: ['whole','half','quarter','eighth'],
+    // blanche pointée si timeSignature = 3/4
+    clefs: ['treble'],
+    defaultClef: 'treble',
+    showGrandStaff: false,   // true si instrument = 'keyboard'
+    keySignatures: ['C'],
+    showRestNames: false,
+    colorCoding: true,
+    noteLabels: true,
+    importEnabled: false,
+    exercises: ['note-identification'],
+  },
+  apprentissage: {
+    durations: ['whole','half','quarter','eighth','16th'],
+    // '32nd' triple croche = niveau Pratique — PAS Apprentissage
+    clefs: ['treble','bass'],
+    defaultClef: 'treble',
+    importEnabled: false,
+    keySignatures: ['C','G','D','F','Bb'],
+    showRestNames: true,
+    exercises: ['note-identification','interval','rhythm','scale-degrees'],
+  },
+  pratique: {
+    durations: ['whole','half','quarter','eighth','16th','32nd'],
+    clefs: ['treble','bass','alto','tenor'],
+    defaultClef: 'treble',
+    importEnabled: true,   // Import activé ICI — pas avant
+  },
+  avance: {
+    durations: ['whole','half','quarter','eighth','16th','32nd','64th'],
+    clefs: ['treble','bass','alto','tenor','soprano','mezzosoprano','bass3','frenchViolin'],
+    defaultClef: 'treble',
+    importEnabled: true,
+  },
+};
+```
+
+## Solfège français — règles absolues
+
+- **DO FIXE** : Do = C toujours, quelle que soit la tonalité. Jamais de movable-do.
+- **SI (pas Ti)** : la 7e note s'appelle Si en français.
+- **Noms des silences** : Pause (whole), Demi-pause (half), Soupir (quarter), Demi-soupir (eighth), Quart de soupir (16th), Huitième de soupir (32nd), Seizième de soupir (64th).
+- **Symboles** : ♯ ♭ ♮ × 𝄫 — jamais `#` ou `b` ASCII dans l'UI.
+- **Tooltip minimal** : nom solfège FR + octave + durée + altération.
+
+```typescript
+const NOTE_NAMES_FR = { C:'Do', D:'Ré', E:'Mi', F:'Fa', G:'Sol', A:'La', B:'Si' };
+const REST_NAMES_FR  = {
+  whole:'Pause', half:'Demi-pause', quarter:'Soupir',
+  eighth:'Demi-soupir', '16th':'Quart de soupir',
+  '32nd':'Huitième de soupir', '64th':'Seizième de soupir',
+};
+```
+
+## Structure des dossiers cible
 
 ```
 solfapp/
 ├── src/
 │   ├── components/
-│   │   ├── score/          # VexFlow & OSMD rendering
-│   │   │   ├── ScoreRenderer.tsx
-│   │   │   ├── NoteInput.tsx
-│   │   │   └── PlaybackCursor.tsx
-│   │   ├── audio/          # Tone.js wrappers
-│   │   │   ├── AudioEngine.tsx
-│   │   │   ├── Metronome.tsx
-│   │   │   └── PitchDetector.tsx
-│   │   ├── exercises/      # Exercise modules
-│   │   │   ├── NoteQuiz.tsx
-│   │   │   ├── IntervalQuiz.tsx
-│   │   │   ├── RhythmQuiz.tsx
-│   │   │   └── Dictation.tsx
-│   │   ├── theory/         # Theory lessons
-│   │   │   ├── CircleOfFifths.tsx
-│   │   │   ├── ScaleBuilder.tsx
-│   │   │   └── ChordBuilder.tsx
-│   │   └── ui/             # Generic shadcn/ui components
-│   ├── hooks/              # Custom React hooks
-│   │   ├── useScore.ts
-│   │   ├── useAudio.ts
-│   │   └── usePitchDetection.ts
+│   │   ├── score/        # ScoreRenderer, NoteInput, PlaybackCursor, GhostNote
+│   │   ├── audio/        # AudioEngine, Metronome, PitchDetector
+│   │   ├── exercises/    # NoteQuiz, IntervalQuiz, RhythmQuiz
+│   │   ├── theory/       # CircleOfFifths, ScaleBuilder, ChordBuilder
+│   │   ├── progression/  # ProgressionPrompt, LevelIndicator, FeatureGate
+│   │   └── ui/           # shadcn composants
+│   ├── hooks/            # useScore, useAudio, useFeature, usePitchDetection
 │   ├── lib/
-│   │   ├── music/          # Pure music utility functions (unit-tested)
-│   │   │   ├── noteUtils.ts
-│   │   │   ├── intervals.ts
-│   │   │   ├── scales.ts
-│   │   │   ├── chords.ts
-│   │   │   └── rhythm.ts
-│   │   └── parsers/
-│   │       ├── musicXmlParser.ts
-│   │       └── abcParser.ts
-│   ├── store/              # Zustand stores
-│   │   ├── scoreStore.ts
-│   │   ├── audioStore.ts
-│   │   └── userStore.ts
-│   ├── pages/              # React Router pages
-│   │   ├── Dashboard.tsx
-│   │   ├── ScoreReader.tsx
-│   │   ├── ScoreEditor.tsx
-│   │   ├── Exercises.tsx
-│   │   └── Theory.tsx
-│   └── types/              # Global TypeScript types
-│       ├── music.ts
-│       └── database.ts
-├── supabase/
-│   └── migrations/         # SQL migrations
-├── public/
-│   └── soundfonts/         # .sf2 audio files
-└── tests/                  # Vitest tests
+│   │   ├── music/        # noteUtils, intervals, scales, rhythm, chords (fonctions PURES)
+│   │   └── parsers/      # musicXmlParser, abcParser, midiParser
+│   ├── store/            # scoreStore, audioStore, userStore, levelStore
+│   ├── pages/            # Dashboard, ScoreReader, ScoreEditor, Exercises, Theory
+│   └── types/            # music.ts, database.ts, levels.ts
+├── supabase/migrations/
+├── public/soundfonts/
+├── tests/
+│   ├── unit/music/       # 100% couverture obligatoire
+│   ├── unit/parsers/
+│   ├── unit/featureFlags/
+│   ├── integration/
+│   ├── components/
+│   ├── e2e/
+│   └── fixtures/         # Partitions de test (.xml, .abc, .mid)
+├── docs/
+│   └── PRD_Architecture.md
+├── CLAUDE.md             # ce fichier
+└── .env.local            # VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY
 ```
 
-## Core Architecture Principles
+## Priorités de tests (ordre d'écriture)
 
-### 1. Progressive Disclosure (Most Important Rule)
-The #1 design rule. New users only see 7 notes, 4 durations, 1 clef. Advanced features unlock progressively based on usage milestones. **Never show advanced UI to beginners.**
+| Priorité | Fichier | Seuil |
+|----------|---------|-------|
+| P1 | `lib/music/noteUtils` | 100% |
+| P1 | `lib/music/rhythm` + `REST_NAMES_FR` | 100% |
+| P1 | `store/featureFlags` — `defaultClef = treble` dans tous les modes | 100% |
+| P2 | `lib/music/intervals`, `scales` | 100% |
+| P2 | Tooltip FR au survol (RTL) | — |
+| P3 | `lib/parsers/musicXmlParser` | 95% |
+| P3 | Undo/Redo store | 90% |
+| P4 | E2E onboarding Playwright | — |
 
-### 2. Four Interface Modes
-| Mode | Level | Visible features |
-|------|-------|-----------------|
-| 🌱 Découverte | Absolute beginner | 7 notes, 4 durations, treble clef, color coding |
-| 📖 Apprentissage | Advanced beginner | Sharps/flats, bass clef, named rests, key signatures |
-| 🎵 Pratique | Intermediate | All clefs, all key signatures, full editor, import |
-| 🎓 Avancé | Expert | Everything unlocked |
+## Pièges techniques connus
 
-Default mode is always **Découverte**. Never ask the user their level upfront.
+1. **`tie` ≠ boolean** — VexFlow a besoin de `'start' | 'stop' | 'continue' | null` + `tiedToId` pour construire l'objet `Tie`. Un booléen ne suffit pas.
 
-### 3. Feature Flags via Zustand
-Access features through the `useFeature(flag)` hook — never hardcode level checks in UI components directly.
+2. **Virgule flottante avec tuplets** — `startBeat` en Float64 donne `0.333...` pour un triolet. Utiliser `Fraction.js` dès que les n-olets sont activés (niveau Avancé).
 
-```typescript
-// Good
-const canImport = useFeature('importEnabled');
+3. **Piano grand-portée** — Quand `instrument = 'keyboard'`, les 2 Parts (treble + bass) doivent être planifiées dans le même `Tone.Transport`. Ne jamais lancer deux Transport séparés.
 
-// Bad
-const { level } = useAppStore();
-if (level === 'pratique' || level === 'avance') { ... }
-```
+4. **VexFlow = rendu uniquement** — Superposer des zones `<rect>` SVG transparentes (`pointer-events: all`) pour capturer les clics et les mapper aux objets `Note` du store.
 
-### 4. Instrument Type (set at onboarding)
-- `melodic`: Single treble clef
-- `keyboard`: Grand staff (treble + bass), set via `showGrandStaff` flag in store
+5. **Web Audio et geste utilisateur** — `Tone.start()` doit être appelé dans un handler `onClick`, jamais au montage du composant.
 
-### 5. State Management — insertNote, not addNote
-Always use `insertNote()` from the store — it handles beat positioning, rests, and audio feedback. Never use a raw `addNote` pattern.
+6. **Import désactivé avant niveau Pratique** — Vérifier `FEATURES[level].importEnabled` avant d'afficher tout composant d'import.
 
-### 6. Audio/Visual Sync (Critical)
-Synchronization flow:
-1. User clicks Play
-2. `AudioEngine.playScore()` reads Score from store
-3. `Tone.Transport` schedules each note
-4. Each played note updates `playbackPosition` in store via callback
-5. `ScoreRenderer` subscribes to store → moves SVG cursor
-
-Do not bypass this flow.
-
-## Data Model
-
-```typescript
-type AppLevel = 'decouverte' | 'apprentissage' | 'pratique' | 'avance';
-type InstrumentType = 'melodic' | 'keyboard';
-type Duration = 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th';
-type Clef = 'treble' | 'bass' | 'bass3' | 'alto' | 'tenor' | 'soprano' | 'mezzosoprano' | 'frenchViolin';
-
-const DEFAULT_CLEF: Clef = 'treble'; // Always — never change without explicit user action
-```
-
-The `Note` interface is the single source of truth. It contains both `name` (English: C/D/E) and `solfege` (French: Do/Ré/Mi). Always display French names in the UI.
-
-## Database (Supabase)
-
-| Table | Key columns | Purpose |
-|-------|-------------|---------|
-| users | id, email, level, instrument | User profiles |
-| scores | id, user_id, data (JSONB), source_file_path | Sheet music — `data` = serialized `Score` JSON |
-| exercises | id, type, level, config (JSONB), score_id | Exercises |
-| progress | id, user_id, exercise_id, result, score | Progress history |
-| badges | id, user_id, badge_type | Achievement system |
-| lessons | id, title, level, content (JSONB), order | Lesson content |
-
-**Storage rule:** `scores.data` (JSONB) = app's working copy. `score-sources` bucket = original imported file, read-only, never modified.
-
-## Music Library (lib/music/) — Pure Functions
-
-All functions in `lib/music/` must be **pure** (no side effects), independently testable with Vitest.
-
-Key functions:
-- `noteToMidi(note, octave)` → MIDI number 0-127
-- `midiToFrequency(midi)` → Hz (A4 = 440 Hz)
-- `noteToSolfege(name, accidental)` → French name (e.g. "Do dièse", "Mi bémol")
-- `calculateInterval(note1, note2)` → interval name in French
-- `buildScale(root, mode)` → note array
-- `buildChord(root, quality)` → note array
-- `getKeySignature(key)` → accidentals array
-- `getRhythmicValue(duration)` → beat value (quarter=1, half=2, whole=4)
-- `transposeNote(note, semitones)` → transposed note
-- `quantizeRhythm(noteEvents)` → quantized note events
-
-## UI/UX Rules
-
-- **Language**: All user-facing text in French
-- **Note names**: French solfège system (Do Ré Mi Fa Sol La Si), never English (C D E F G A B) in the UI (English names can be shown in parentheses optionally)
-- **Color coding** (Découverte mode): Do=red, Ré=orange, Mi=yellow, Fa=green, Sol=blue, La=indigo, Si=violet (Boomwhackers / Montessori standard)
-- **Progression prompts**: Non-intrusive toast at bottom of screen, never a blocking modal. User can dismiss with ×. Don't show same message within 7 days.
-- **"Simplifier l'interface"**: Always available in settings to go back to Découverte mode
-- **Once unlocked, always unlocked**: Never revoke a feature once a user has earned it
-
-## Note on Tuplets / Floating Point
-
-When using tuplets (triolets, etc.), `startBeat` must be stored as a rational number (e.g. `{ num: 1, den: 3 }`) or use `Fraction.js` — never use raw floating point (0.333... causes bugs).
-
-## Testing
-
-Unit tests live in `tests/`. Focus on `lib/music/` — pure functions. All music logic (intervals, scales, MIDI conversion, rhythm values) must have test coverage.
+## Variables d'environnement
 
 ```bash
-npm run test             # Run all tests
-npm run test -- --watch  # Watch mode
+# .env.local
+VITE_SUPABASE_URL=https://xxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGci...
+
+# .env.test
+VITE_SUPABASE_URL=http://localhost:54321
+VITE_SUPABASE_ANON_KEY=test-anon-key
 ```
+
+## Pour démarrer un nouveau projet depuis zéro
+
+```bash
+npm create vite@latest solfapp -- --template react-ts
+cd solfapp
+npm install vexflow osmd tone @tonejs/midi soundfont-player pitchy abcjs jszip
+npm install zustand react-router-dom framer-motion fraction.js
+npm install -D tailwindcss @supabase/supabase-js vitest @playwright/test
+npm install -D @testing-library/react @testing-library/user-event msw
+npx tailwindcss init
+mkdir -p docs && cp /path/to/PRD_Architecture.md docs/
+mkdir -p .claude/commands
+```
+
+---
+
+Référence complète : `docs/PRD_Architecture.md` — architecture exhaustive.
