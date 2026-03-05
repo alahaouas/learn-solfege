@@ -101,6 +101,12 @@ export default function Onboarding() {
               <button className="btn-primary w-full" onClick={nextStep}>
                 Commencer →
               </button>
+              <button
+                className="mt-3 w-full text-sm text-slate-400 hover:text-slate-600 transition-colors"
+                onClick={handleFinish}
+              >
+                Passer l'introduction →
+              </button>
             </motion.div>
           )}
 
@@ -219,9 +225,8 @@ export default function Onboarding() {
                 <button
                   className="btn-primary flex-1"
                   onClick={nextStep}
-                  disabled={!playedNote}
                 >
-                  {playedNote ? 'Continuer →' : 'Joue une note d\'abord'}
+                  Continuer →
                 </button>
               </div>
             </motion.div>

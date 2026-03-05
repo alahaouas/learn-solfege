@@ -13,3 +13,7 @@ if [ -f "package.json" ]; then
   echo "Installing npm dependencies..."
   npm install
 fi
+
+# Start the dev server in the background for the preview panel
+echo "Starting dev server on port 5173..."
+npm run dev -- --host &
