@@ -1,25 +1,49 @@
 // ============================================================
 // SolfApp — Client Supabase
 // ============================================================
+// Note : les types précis seront générés par `supabase gen types typescript`
+// une fois le projet Supabase connecté. En attendant, les helpers
+// retournent des types explicites définis dans @/types/database.
+// ============================================================
 
 import { createClient } from '@supabase/supabase-js';
-import type { Database } from '@/types/database';
+import type {
+  UserProfile,
+  SavedScore,
+  ExerciseResult,
+  Badge,
+} from '@/types/database';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-if (!supabaseUrl || !supabaseAnonKey) {
+export const isSupabaseConfigured =
+  Boolean(supabaseUrl) &&
+  supabaseUrl !== 'https://xxxx.supabase.co' &&
+  Boolean(supabaseAnonKey) &&
+  supabaseAnonKey !== 'eyJhbGci...';
+
+if (!isSupabaseConfigured) {
   console.warn(
-    'Supabase credentials manquantes. Copier .env.local.example vers .env.local et renseigner les valeurs.'
+    '[SolfApp] Supabase non configuré.\n' +
+      'Copiez .env.local.example → .env.local et renseignez\n' +
+      'VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.\n' +
+      "L'authentification et la persistence cloud sont désactivées."
   );
 }
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-});
+// createClient sans générique Database : les types seront affinés après
+// `supabase gen types typescript --project-id <id> > src/types/database.ts`
+export const supabase = createClient(
+  supabaseUrl ?? 'https://placeholder.supabase.co',
+  supabaseAnonKey ?? 'placeholder-anon-key',
+  {
+    auth: {
+      persistSession: isSupabaseConfigured,
+      autoRefreshToken: isSupabaseConfigured,
+    },
+  }
+);
 
 // ============================================================
 // Auth helpers
@@ -31,6 +55,15 @@ export async function signInWithEmail(email: string, password: string) {
 
 export async function signUpWithEmail(email: string, password: string) {
   return supabase.auth.signUp({ email, password });
+}
+
+export async function signInWithGitHub() {
+  return supabase.auth.signInWithOAuth({
+    provider: 'github',
+    options: {
+      redirectTo: `${window.location.origin}/`,
+    },
+  });
 }
 
 export async function signOut() {
@@ -46,16 +79,18 @@ export async function getSession() {
 // ============================================================
 
 export async function getProfile(userId: string) {
-  return supabase.from('profiles').select('*').eq('id', userId).single();
+  return supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single<UserProfile>();
 }
 
 export async function updateProfile(
   userId: string,
-  updates: Database['public']['Tables']['profiles']['Update']
+  updates: Partial<Omit<UserProfile, 'id' | 'created_at'>>
 ) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const client = supabase as any;
-  return client
+  return supabase
     .from('profiles')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('id', userId);
@@ -66,11 +101,13 @@ export async function updateProfile(
 // ============================================================
 
 export async function saveScore(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  scoreData: any
+  scoreData: Omit<SavedScore, 'id' | 'created_at' | 'updated_at'>
 ) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return supabase.from('scores').insert(scoreData as any).select().single();
+  return supabase
+    .from('scores')
+    .insert(scoreData)
+    .select()
+    .single<SavedScore>();
 }
 
 export async function getUserScores(userId: string) {
@@ -78,11 +115,16 @@ export async function getUserScores(userId: string) {
     .from('scores')
     .select('id, title, composer, created_at, updated_at, tags')
     .eq('user_id', userId)
-    .order('updated_at', { ascending: false });
+    .order('updated_at', { ascending: false })
+    .returns<Pick<SavedScore, 'id' | 'title' | 'composer' | 'created_at' | 'updated_at' | 'tags'>[]>();
 }
 
 export async function loadScore(scoreId: string) {
-  return supabase.from('scores').select('*').eq('id', scoreId).single();
+  return supabase
+    .from('scores')
+    .select('*')
+    .eq('id', scoreId)
+    .single<SavedScore>();
 }
 
 export async function deleteScore(scoreId: string) {
@@ -94,11 +136,9 @@ export async function deleteScore(scoreId: string) {
 // ============================================================
 
 export async function saveExerciseResult(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  result: any
+  result: Omit<ExerciseResult, 'id'>
 ) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return supabase.from('exercise_results').insert(result as any);
+  return supabase.from('exercise_results').insert(result);
 }
 
 export async function getUserStats(userId: string) {
@@ -107,7 +147,8 @@ export async function getUserStats(userId: string) {
     .select('exercise_type, score, max_score, completed_at')
     .eq('user_id', userId)
     .order('completed_at', { ascending: false })
-    .limit(100);
+    .limit(100)
+    .returns<Pick<ExerciseResult, 'exercise_type' | 'score' | 'max_score' | 'completed_at'>[]>();
 }
 
 // ============================================================
@@ -115,12 +156,17 @@ export async function getUserStats(userId: string) {
 // ============================================================
 
 export async function getUserBadges(userId: string) {
-  return supabase.from('badges').select('*').eq('user_id', userId);
+  return supabase
+    .from('badges')
+    .select('*')
+    .eq('user_id', userId)
+    .returns<Badge[]>();
 }
 
 export async function awardBadge(userId: string, badgeType: string) {
-  return supabase
-    .from('badges')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .insert({ user_id: userId, badge_type: badgeType, earned_at: new Date().toISOString() } as any);
+  return supabase.from('badges').insert({
+    user_id: userId,
+    badge_type: badgeType,
+    earned_at: new Date().toISOString(),
+  });
 }
