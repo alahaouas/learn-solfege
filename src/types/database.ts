@@ -90,7 +90,7 @@ export interface LevelUnlock {
   level: AppLevel;
 }
 
-// Supabase Database type helper
+// Supabase Database type — format attendu par @supabase/supabase-js v2
 export interface Database {
   public: {
     Tables: {
@@ -98,27 +98,36 @@ export interface Database {
         Row: UserProfile;
         Insert: Omit<UserProfile, 'created_at' | 'updated_at'>;
         Update: Partial<Omit<UserProfile, 'id' | 'created_at'>>;
+        Relationships: [];
       };
       scores: {
         Row: SavedScore;
         Insert: Omit<SavedScore, 'id' | 'created_at' | 'updated_at'>;
         Update: Partial<Omit<SavedScore, 'id' | 'user_id' | 'created_at'>>;
+        Relationships: [];
       };
       exercise_results: {
         Row: ExerciseResult;
         Insert: Omit<ExerciseResult, 'id'>;
-        Update: never;
+        Update: Partial<Omit<ExerciseResult, 'id' | 'user_id'>>;
+        Relationships: [];
       };
       badges: {
         Row: Badge;
         Insert: Omit<Badge, 'id'>;
-        Update: never;
+        Update: Partial<Omit<Badge, 'id' | 'user_id'>>;
+        Relationships: [];
       };
       level_unlocks: {
         Row: LevelUnlock;
         Insert: Omit<LevelUnlock, 'id'>;
-        Update: never;
+        Update: Partial<Omit<LevelUnlock, 'id' | 'user_id'>>;
+        Relationships: [];
       };
     };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
+    Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
   };
 }

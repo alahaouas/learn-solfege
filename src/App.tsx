@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useUserStore } from '@/store/userStore';
+import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import Onboarding from '@/pages/Onboarding';
 import Dashboard from '@/pages/Dashboard';
 import ScoreReader from '@/pages/ScoreReader';
@@ -10,6 +11,7 @@ import Layout from '@/components/ui/Layout';
 
 function App() {
   const onboardingCompleted = useUserStore((s) => s.onboardingCompleted);
+  useSupabaseAuth();
 
   return (
     <BrowserRouter>
