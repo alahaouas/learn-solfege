@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useUserStore } from '@/store/userStore';
 import { useSupabaseAuth } from '@/hooks/useSupabaseAuth';
 import Onboarding from '@/pages/Onboarding';
+import SignIn from '@/pages/SignIn';
 import Dashboard from '@/pages/Dashboard';
 import ScoreReader from '@/pages/ScoreReader';
 import ScoreEditor from '@/pages/ScoreEditor';
@@ -16,6 +17,9 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Authentification */}
+        <Route path="/connexion" element={<SignIn />} />
+
         {/* Onboarding — toujours accessible si pas encore complété */}
         <Route path="/onboarding" element={<Onboarding />} />
 
